@@ -1,0 +1,290 @@
+---
+title: "DATA 622 Homework 1"
+author: "Mario Pena"
+date: "March 17, 2022"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(DataExplorer)
+library(caret)
+```
+
+
+### Objective
+
+Visit the following website and explore the range of sizes of this dataset (from 100 to 5 million records).
+
+https://eforexcel.com/wp/downloads-18-sample-csv-files-data-sets-for-testing-sales/ 
+
+Based on your computer's capabilities (memory, CPU), select 2 files you can handle (recommended one small, one large)
+
+Review the structure and content of the tables, and think which two machine learning algorithms presented so far could be used to analyze the data, and how can they be applied in the suggested environment of the datasets.
+
+Write a short essay explaining your selection. Then, select one of the 2 algorithms and explore how to analyze and predict an outcome based on the data available. This will be an exploratory exercise, so feel free to show errors and warnings that raise during the analysis. Test the code with both datasets selected and compare the results. Which result will you trust if you need to make a business decision? Do you think an analysis could be prone to errors when using too much data, or when using the least amount possible?
+
+
+### Data Exploration
+
+We will first load the data, which I have saved in a local folder, and explore it.
+
+```{r}
+sales_small <- readr::read_csv("10000 Sales Records.csv")
+sales_large <- readr::read_csv("100000 Sales Records.csv")
+```
+
+The data contain the variables "Region, Country, Item Type, Sales Channel, Order Priority, Order Date, Order ID, Ship Date, Units Sold, Unit Price, Unit Cost, Total Revenue, Total Cost, and Total Profit"
+
+```{r}
+head(sales_small)
+```
+
+From the structure of the data below, we can observe that a lot of these variables are type "Character". We may need to transform some of the variables into factors in order to better analyze the data with R.
+
+```{r}
+str(sales_small)
+```
+
+These data contain 10000 observations and 14 variables.
+
+```{r}
+dim(sales_small)
+```
+
+Below, we can also observe that we do not have any missing values on either the small or large data sets.
+
+```{r}
+plot_missing(sales_small)
+plot_missing(sales_large)
+```
+
+
+
+### Data Preparation
+
+We will create a separate data set in order to maintain the original data and make all the necessary transformations there. First we'll transform the previous variables that were of type character into factor, and the two date variables into type date.
+
+```{r}
+sales_prepared <- sales_small
+sales_prepared$Region <- as.factor(sales_prepared$Region)
+sales_prepared$Country <- as.factor(sales_prepared$Country)
+sales_prepared$`Item Type` <- as.factor(sales_prepared$`Item Type`)
+sales_prepared$`Sales Channel` <- as.factor(sales_prepared$`Sales Channel`)
+sales_prepared$`Order Priority` <- as.factor(sales_prepared$`Order Priority`)
+sales_prepared$`Order Date` <- as.Date(sales_prepared$`Order Date`, "%m/%d/%Y")
+sales_prepared$`Ship Date` <- as.Date(sales_prepared$`Ship Date`, "%m/%d/%Y")
+
+sales_prepared2 <- sales_large
+sales_prepared2$Region <- as.factor(sales_prepared2$Region)
+sales_prepared2$Country <- as.factor(sales_prepared2$Country)
+sales_prepared2$`Item Type` <- as.factor(sales_prepared2$`Item Type`)
+sales_prepared2$`Sales Channel` <- as.factor(sales_prepared2$`Sales Channel`)
+sales_prepared2$`Order Priority` <- as.factor(sales_prepared2$`Order Priority`)
+sales_prepared2$`Order Date` <- as.Date(sales_prepared2$`Order Date`, "%m/%d/%Y")
+sales_prepared2$`Ship Date` <- as.Date(sales_prepared2$`Ship Date`, "%m/%d/%Y")
+```
+
+We have changed the structure of our variables as it is shown below.
+
+```{r}
+str(sales_prepared)
+```
+
+We can also observe the summary statistics for our transformed data.
+
+```{r}
+summary(sales_prepared)
+```
+
+The plots below show that most of the sales take place or come from the regions of Europe and Sub-Saharan Africa. Additionally, Offline and Online sales look evenly distributed among the data.
+
+```{r}
+plot(sales_prepared$`Sales Channel`)
+plot(sales_prepared$Region)
+```
+
+
+### Build Models
+
+I would like to predict the "Sales Channel" variable and find out whether the sale was done "Online" or "Offline" based on the "Country" variable that the sale came from or was conducted. I will also include the "Item Type" as a predictor variable to help us in the model.
+
+I have decided to us a Logistic Regression model as the dependent variable in this case is categorical and binary with two possible outcomes, "Offline" and "Online". I will also compare the LR model with a KNN model as this algorithm is simple and easy-to-implement. Additionally, the KNN model can be used for both classification and regression problems, and given we have data that will allow the algorithm to execute a supervised machine learning model, this could produce very interesting results and predictions.
+
+The code below has been borrowed from the class examples in order to run a Logistic Regression and KNN model on our data.
+
+We first take a look at the "Offline" and "Online" numbers by region to detect any relationships. At a first glance, we can observe that the number of "Sales Channel" seem to be evenly distributed region by region.
+
+```{r}
+# Two-way table of factor variables
+xtabs(~`Sales Channel` + Region, data = sales_prepared)
+```
+
+Our next step is to partition the data into training (80%) and test (20%) in order to measure how well the models perform.
+
+```{r}
+# Partition data - train (80%) & test (20%)
+set.seed(1234)
+ind <- sample(2, nrow(sales_prepared), replace = T, prob = c(0.8, 0.2))
+train <- sales_prepared[ind==1,]
+test <- sales_prepared[ind==2,]
+```
+
+#### Logistic Regression
+
+We run the logistic regression model below:
+
+```{r}
+# Logistic regression model
+mymodel <- glm(`Sales Channel` ~ Country + `Item Type`, data = train, family = 'binomial')
+summary(mymodel)
+```
+
+```{r}
+# Prediction
+p1 <- predict(mymodel, train, type = 'response')
+head(p1)
+```
+
+It seems that our predictions from the training set are only about 44% accurate, which is not great.
+
+```{r}
+# Misclassification error - train data
+pred1 <- ifelse(p1>0.5, 1, 0)
+tab1 <- table(Predicted = pred1, Actual = train$`Sales Channel`)
+tab1
+1 - sum(diag(tab1))/sum(tab1)
+```
+
+The predictions from the test set have improved a bit, increasing to 51%
+
+```{r}
+# Misclassification error - test data
+p2 <- predict(mymodel, test, type = 'response')
+pred2 <- ifelse(p2>0.5, 1, 0)
+tab2 <- table(Predicted = pred2, Actual = test$`Sales Channel`)
+tab2
+1 - sum(diag(tab2))/sum(tab2)
+```
+
+Additionally, we have also gotten a value of 0.66 for our goodness of fit test, suggesting that the results are not significant and the variable "Sales Channel" is independent from, or has no relationship with "Country" and "Item Type".
+
+```{r}
+# Goodness-of-fit test
+with(mymodel, pchisq(null.deviance - deviance, df.null-df.residual, lower.tail = F))
+```
+
+#### KNN
+
+Now we will use the KNN model and see if our predictions can be improved.
+
+```{r}
+# K-NN model
+trControl <- trainControl(method = "repeatedcv", #repeated cross-validation
+                          number = 3,  # number of resampling iterations
+                          classProbs = TRUE,
+                          summaryFunction = twoClassSummary)  # classProbs needed for ROC
+set.seed(1234)
+mymodel_knn <- train(`Sales Channel` ~ Country + `Item Type`, 
+             data = train,
+             method = "knn",
+             metric = "ROC",
+             trControl = trControl,
+                    )
+```
+
+As we can see below, the ROC is close to 50% with k=9. This suggests that this model has not improved our predictions much more than the logistic regression model.
+
+
+```{r}
+# Model performance
+mymodel_knn
+```
+
+In the following graph we can observe how the ROC improves from 7 to 9 neighbors.
+
+```{r}
+plot(mymodel_knn)
+```
+
+```{r}
+p3 <- predict(mymodel_knn, newdata = test )
+
+```
+
+The accuracy has also not improved compared to the logistic regression model on our test set:
+
+```{r}
+confusionMatrix(p3, test$`Sales Channel`, positive = 'Offline' )
+```
+
+### More Data
+
+Now we will use the larger data set to find out if adding data to our model will improve its predictive accuracy. I have decided to keep using the logistic regression model as it gave us slightly better results than the KNN model when using the test set.
+
+Our larger data set contains 100,000 observations and the same 14 variables as our previous smaller data set.
+
+```{r}
+dim(sales_large)
+```
+
+We partition the data as previously done using the "sales_prepared2" data set that we transformed earlier.
+
+```{r}
+# Partition data - train (80%) & test (20%)
+set.seed(12345)
+ind <- sample(2, nrow(sales_prepared2), replace = T, prob = c(0.8, 0.2))
+train2 <- sales_prepared2[ind==1,]
+test2 <- sales_prepared2[ind==2,]
+```
+
+We run the logistic regression model below:
+
+```{r}
+# Logistic regression model
+mymodel2 <- glm(`Sales Channel` ~ Country + `Item Type`, data = train2, family = 'binomial')
+```
+
+```{r}
+# Prediction
+p4 <- predict(mymodel2, train2, type = 'response')
+head(p4)
+```
+
+The accuracy of our model does not seem to have improved with more data.
+
+```{r}
+# Misclassification error - train data
+pred4 <- ifelse(p4>0.5, 1, 0)
+tab4 <- table(Predicted = pred4, Actual = train2$`Sales Channel`)
+tab4
+1 - sum(diag(tab4))/sum(tab4)
+```
+
+The predictions from the test set have improved a bit, increasing to almost 50%. However, we did not see a big chance in accuracy when adding more data to our model.
+
+```{r}
+# Misclassification error - test data
+p5 <- predict(mymodel2, test2, type = 'response')
+pred5 <- ifelse(p5>0.5, 1, 0)
+tab5 <- table(Predicted = pred5, Actual = test2$`Sales Channel`)
+tab5
+1 - sum(diag(tab5))/sum(tab5)
+```
+
+
+### Conclusion
+
+After executing different models on different sizes of data sets, I have not been able to determine that adding or having a bigger data set improves the efficacy of a model. Perhaps the data I started with was already large enough and it did not make a difference how much more data was included in the model. Additionally, the models have room for improvement if we consider some of the other predictor variables in the data. We could potentially also predict "Units Sold" based on our other variables and could be an interesting problem to solve.
+
+
