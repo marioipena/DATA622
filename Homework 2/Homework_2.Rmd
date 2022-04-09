@@ -1,0 +1,312 @@
+---
+title: "DATA 622 Homework 2"
+author: "Mario Pena"
+date: "April 1, 2022"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r warning=FALSE}
+library(tidyverse)
+library(DataExplorer)
+library(rpart)
+library(randomForest)
+library(caret)
+```
+
+
+### Objective
+
+Based on the latest topics presented, bring a dataset of your choice and create a Decision Tree where you can solve a classification or regression problem and predict the outcome of a particular feature or detail of the data used.
+
+Switch variables to generate 2 decision trees and compare the results. Create a random forest for regression and analyze the results.
+
+Based on real cases where desicion trees went wrong, and 'the bad & ugly' aspects of decision trees (https://decizone.com/blog/the-good-the-bad-the-ugly-of-using-decision-trees), how can you change this perception when using the decision tree you created to solve a real problem?
+
+
+### Data Exploration
+
+I have decided to use data from "data.cityofnewyork.us" website, which has a collection of different data sets to choose from and work with. Within this website I found a data set with the leading causes of death in New York City that seemed interesting.
+
+We will first load the data, which I have saved in a local folder, and explore it.
+
+```{r warning=FALSE}
+data <- readr::read_csv("New_York_City_Leading_Causes_of_Death.csv")
+```
+
+The data contain the variables "Year, Leading Cause, Sex, Race Ethnicity, Deaths, Death Rate, and Age Adjusted Death Rate".
+
+```{r}
+head(data)
+```
+
+Since "Leading Cause" and "Race Ethnicity" seem like categorical variables we may want to use in our model, let's take a look at how many different categories we would find within each of these variables.
+
+```{r}
+data %>%
+  distinct(`Leading Cause`)
+
+data %>%
+  distinct(`Race Ethnicity`)
+```
+
+Seems like we have 34 different categories for "Leading Cause" and 8 for "Race Ethnicity".
+
+From the structure of the data below, we can observe that a lot of these variables are type "Character". We may need to transform some of the variables into factors in order to better analyze the data with R.
+
+```{r}
+str(data)
+```
+
+These data contain 1,272 observations and 7 variables.
+
+```{r}
+dim(data)
+```
+
+Although, below it shows that there are no missing values for "Deaths", I did note on the file that there are about 138 observations that have a "." instead of a value for "Deaths". Something we will have to think about when dealing with these missing values in our models. we can also observe that we have missing values for "Age Adjusted Death Rate" and "Death Rate", but I do not anticipate I will be using these variables in the models.
+
+```{r}
+plot_missing(data)
+```
+
+Additionally, it seems that the variable "Sex" may have possible values that include "F", "Female", "M" and "Male". We will substitute the values "Female" and "Male" with their corresponding letter equivalent. And the variables "Leading Cause" and "Race Ethnicity" have some repetitive values phrased in different ways. We will take care of cleaning up these variables in our next section.
+
+### Data Preparation
+
+We will create a separate data set in order to maintain the original data and make all the necessary transformations there. First we'll transform the previous variables that were of type character into factor.
+
+```{r}
+data_prepared <- data
+
+#Value substitutions cleanup
+data_prepared$`Leading Cause`[data_prepared$`Leading Cause` == "Accidents Except Drug Posioning (V01-X39, X43, X45-X59, Y85-Y86)"] <- "Accidents Except Drug Poisoning (V01-X39, X43, X45-X59, Y85-Y86)"
+data_prepared$`Leading Cause`[data_prepared$`Leading Cause` == "Chronic Liver Disease and Cirrhosis (K70, K73)"] <- "Chronic Liver Disease and Cirrhosis (K70, K73-K74)"
+data_prepared$`Leading Cause`[data_prepared$`Leading Cause` == "Intentional Self-Harm (Suicide: X60-X84, Y87.0)"] <- "Intentional Self-Harm (Suicide: U03, X60-X84, Y87.0)"
+data_prepared$Sex[data_prepared$Sex == "Female"] <- "F"
+data_prepared$Sex[data_prepared$Sex == "Male"] <- "M"
+data_prepared$`Race Ethnicity`[data_prepared$`Race Ethnicity` == "Non-Hispanic Black"] <- "Black Non-Hispanic"
+data_prepared$`Race Ethnicity`[data_prepared$`Race Ethnicity` == "Non-Hispanic White"] <- "White Non-Hispanic"
+
+#Data type change for columns of interest
+data_prepared$Year <- as.integer(data_prepared$Year)
+data_prepared$`Leading Cause` <- as.factor(data_prepared$`Leading Cause`)
+data_prepared$Sex <- as.factor(data_prepared$Sex)
+data_prepared$`Race Ethnicity` <- as.factor(data_prepared$`Race Ethnicity`)
+data_prepared$Deaths <- as.integer(data_prepared$Deaths)
+```
+
+We have changed the structure of our variables as it is shown below.
+
+```{r}
+str(data_prepared)
+```
+
+```{r}
+hist(data_prepared$Deaths)
+```
+
+Given that the distribution of "Deaths" is skewed to the right, I will use the median to replace the missing values that were present on this column to avoid including any bias in the results.
+
+```{r}
+data_prepared$Deaths[is.na(data_prepared$Deaths)] <- median(data_prepared$Deaths, na.rm=TRUE)
+
+# We use this line of code to get rid of decimals.
+data_prepared$Deaths <- trunc(data_prepared$Deaths)
+```
+
+We can also observe the summary statistics for our transformed data.
+
+```{r}
+summary(data_prepared)
+```
+
+
+### Build Models
+
+I would like to predict the number of "Deaths" variable and find out whether variables "Leading Cause", "Sex" and "Race Ethnicity" have any relationship with our dependent variable.
+
+The code below has been borrowed from the class examples in order to run a decision tree model on our data.
+
+We first take a look at the "Sex" variable to see if it is evenly distributed among our "Race Ethnicity" variable. At a first glance, we can observe that the number of Females and Males in the data seem to be evenly distributed.
+
+```{r}
+# Two-way table of factor variables
+xtabs(~Sex + `Race Ethnicity`, data = data_prepared)
+```
+
+Our next step is to partition the data into training (80%) and test (20%) in order to measure how well the models perform.
+
+```{r}
+# Partition data - train (80%) & test (20%)
+set.seed(1234)
+ind <- sample(2, nrow(data_prepared), replace = T, prob = c(0.8, 0.2))
+train <- data_prepared[ind==1,]
+test <- data_prepared[ind==2,]
+```
+
+#### First Decision Tree
+
+We run the first decision tree model to predict number of "Deaths" with the variable "Leading Cause" below:
+
+```{r}
+# grow tree
+first_model <- rpart(Deaths ~ `Leading Cause`,
+   method="anova", train)
+```
+
+
+```{r}
+summary(first_model) # detailed summary of splits
+plotcp(first_model) # visualize cross-validation results
+```
+
+As we can see in the graphs below, the R-square increases with the number of splits, and the XRelative Error decreases as the number of splits increase.
+
+```{r}
+# create additional plots
+par(mfrow=c(1,2)) # two plots on one page
+rsq.rpart(first_model) # visualize cross-validation results
+```
+```{r}
+# plot tree
+plot(first_model, uniform=TRUE,
+   main="Regression Tree for Number of Deaths ")
+text(first_model, use.n=TRUE, all=TRUE, cex=.8)
+```
+
+```{r}
+# make predictions
+p <- predict(first_model, test)
+# Root Mean Square Error
+sqrt(mean((test$Deaths - p)^2))
+# R-square
+(cor(test$Deaths, p))^2
+```
+
+We can observe above that the RMSE and R-square results are not great when making our predictions on the first model.
+
+#### Second Decision Tree
+
+We run the second decision tree model to predict number of "Deaths" with the variables "Race Ethnicity" and "Sex" below:
+
+```{r}
+# grow second tree
+second_model <- rpart(Deaths ~ `Race Ethnicity` + Sex,
+   method="anova", train)
+```
+
+
+```{r}
+summary(second_model) # detailed summary of splits
+plotcp(second_model) # visualize cross-validation results
+```
+
+As we can see in the graphs below, the R-square increases with the number of splits, and the XRelative Error decreases as the number of splits increase.
+
+```{r}
+# create additional plots
+par(mfrow=c(1,2)) # two plots on one page
+rsq.rpart(second_model) # visualize cross-validation results
+```
+
+```{r}
+# plot tree
+plot(second_model, uniform=TRUE,
+   main="Regression Tree for Number of Deaths ")
+text(second_model, use.n=TRUE, all=TRUE, cex=.8)
+```
+
+```{r}
+# make predictions
+p2 <- predict(second_model, test)
+# Root Mean Square Error
+sqrt(mean((test$Deaths - p2)^2))
+# R-square
+(cor(test$Deaths, p2))^2
+```
+
+We can observe above that the RMSE and R-square results did not improve after switching variables and making predictions on the second model.
+
+#### Random Forest
+
+We will now use a random forest model and add more predictor variables to our algorithm.
+
+I first had to create another copy for our train and test data and change the column names to remove spaces as the `randomForest()` function was not working properly.
+
+```{r}
+train2 <- train
+colnames(train2)[2] <- "LeadingCause"
+colnames(train2)[4] <- "RaceEthnicity"
+
+test2 <- test
+colnames(test2)[2] <- "LeadingCause"
+colnames(test2)[4] <- "RaceEthnicity"
+```
+
+```{r}
+third_model <- randomForest(Deaths ~ LeadingCause + RaceEthnicity + Sex, importance = TRUE, na.action = na.omit, train2)
+```
+
+From the results below we can see that the percentage of variance explained with this model is about 76%, which suggests this is a very good model.
+
+```{r}
+#Print regression model
+print(third_model)
+```
+
+Below, we can observe that the "Error" decreases drastically only after a few trees in the model.
+
+```{r}
+# Plot the error vs the number of trees graph
+plot(third_model)
+```
+
+```{r}
+# make predictions
+p3 <- predict(third_model, test2)
+# Root Mean Square Error
+sqrt(mean((test2$Deaths - p3)^2))
+# R-square
+(cor(test2$Deaths, p3))^2
+```
+
+As we can observe above, the RMSE and R-square improved drastically with the random forest model and by adding extra predictor variables to our model.
+
+
+#### Decision Tree with Same Predictors as RF
+
+As a curiosity, I decided to run an extra decision tree model with the same predictors as the random forest previously.
+
+```{r}
+# grow third tree
+fourth_model <- rpart(Deaths ~ `Leading Cause` + `Race Ethnicity` + Sex,
+   method="anova", train)
+```
+
+We would actually be able to get a better RMSE and R-square if we were to use the decision tree model with the same predictors we have used for our random forest model above. However, such a high performing R-square may suggest that we are over-fitting our data with this and the previous model.
+
+```{r}
+# make predictions
+p4 <- predict(fourth_model, test)
+# Root Mean Square Error
+sqrt(mean((test$Deaths - p4)^2))
+# R-square
+(cor(test$Deaths, p4))^2
+```
+
+### Conclusion
+
+After executing different decision tree models with different predictor variables, I have not been able to determine which would be the most appropriate model to use. The models with fewers predictor variables do not perform well, and the models that include more predictor variables seem to work extraordinarily well and may suggest over-fit. In any case, if I have a decision tree that performs just as well as a random forest, I would most likely choose the decision tree as it is the simpler model.
+
+Additionally, based on real cases where decision trees have gone "wrong", I would argue that the machine learning version of a decision tree is an algorithm that can simplify an outcome for the user with its ability to compute different probabilities and arrive at an optimum result. Although, decision trees that are represented graphically can become very complicated, the algorithm behind a decision tree in machine learning can actually do a lot of the visual work for you but in a rather mathematical manner.
