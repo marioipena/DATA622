@@ -1,0 +1,231 @@
+---
+title: "DATA 622 Homework 3"
+author: "Mario Pena"
+date: "April 24, 2022"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r warning=FALSE}
+library(tidyverse)
+library(DataExplorer)
+library(rpart)
+library(e1071)
+library(caret)
+```
+
+
+### Objective
+
+Perform an analysis of the dataset used in Homework #2 using the SVM algorithm. Compare the results with the results from previous homework.
+
+Based on articles
+
+https://www.hindawi.com/journals/complexity/2021/5550344/
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8137961/
+
+Search for academic content (at least 3 articles) that compare the use of decision trees vs SVMs in your current area of expertise.
+
+Which algorithm is recommended to get more accurate results? Is it better for classification or regression scenarios? Do you agree with the recommendations? Why?
+
+
+### Data Exploration
+
+Since we will be working off of a previous assignment for this homework, most of the first half of the work, such as data exploration and data preparation, will be staying the same.
+
+I have decided to use data from "data.cityofnewyork.us" website, which has a collection of different data sets to choose from and work with. Within this website I found a data set with the leading causes of death in New York City that seemed interesting.
+
+We will first load the data, which I have saved in a local folder, and explore it.
+
+```{r warning=FALSE}
+data <- readr::read_csv("New_York_City_Leading_Causes_of_Death.csv")
+```
+
+The data contain the variables "Year, Leading Cause, Sex, Race Ethnicity, Deaths, Death Rate, and Age Adjusted Death Rate".
+
+```{r}
+head(data)
+```
+
+Since "Leading Cause" and "Race Ethnicity" seem like categorical variables we may want to use in our model, let's take a look at how many different categories we would find within each of these variables.
+
+```{r}
+data %>%
+  distinct(`Leading Cause`)
+
+data %>%
+  distinct(`Race Ethnicity`)
+```
+
+Seems like we have 34 different categories for "Leading Cause" and 8 for "Race Ethnicity".
+
+From the structure of the data below, we can observe that a lot of these variables are type "Character". We may need to transform some of the variables into factors in order to better analyze the data with R.
+
+```{r}
+str(data)
+```
+
+These data contain 1,272 observations and 7 variables.
+
+```{r}
+dim(data)
+```
+
+Although, below it shows that there are no missing values for "Deaths", I did note on the file that there are about 138 observations that have a "." instead of a value for "Deaths". Something we will have to think about when dealing with these missing values in our models. we can also observe that we have missing values for "Age Adjusted Death Rate" and "Death Rate", but I do not anticipate I will be using these variables in the models.
+
+```{r}
+plot_missing(data)
+```
+
+Additionally, it seems that the variable "Sex" may have possible values that include "F", "Female", "M" and "Male". We will substitute the values "Female" and "Male" with their corresponding letter equivalent. And the variables "Leading Cause" and "Race Ethnicity" have some repetitive values phrased in different ways. We will take care of cleaning up these variables in our next section.
+
+### Data Preparation
+
+We will create a separate data set in order to maintain the original data and make all the necessary transformations there. First we'll transform the previous variables that were of type character into factor.
+
+```{r}
+data_prepared <- data
+
+#Value substitutions cleanup
+data_prepared$`Leading Cause`[data_prepared$`Leading Cause` == "Accidents Except Drug Posioning (V01-X39, X43, X45-X59, Y85-Y86)"] <- "Accidents Except Drug Poisoning (V01-X39, X43, X45-X59, Y85-Y86)"
+data_prepared$`Leading Cause`[data_prepared$`Leading Cause` == "Chronic Liver Disease and Cirrhosis (K70, K73)"] <- "Chronic Liver Disease and Cirrhosis (K70, K73-K74)"
+data_prepared$`Leading Cause`[data_prepared$`Leading Cause` == "Intentional Self-Harm (Suicide: X60-X84, Y87.0)"] <- "Intentional Self-Harm (Suicide: U03, X60-X84, Y87.0)"
+data_prepared$Sex[data_prepared$Sex == "Female"] <- "F"
+data_prepared$Sex[data_prepared$Sex == "Male"] <- "M"
+data_prepared$`Race Ethnicity`[data_prepared$`Race Ethnicity` == "Non-Hispanic Black"] <- "Black Non-Hispanic"
+data_prepared$`Race Ethnicity`[data_prepared$`Race Ethnicity` == "Non-Hispanic White"] <- "White Non-Hispanic"
+
+#Data type change for columns of interest
+data_prepared$Year <- as.integer(data_prepared$Year)
+data_prepared$`Leading Cause` <- as.factor(data_prepared$`Leading Cause`)
+data_prepared$Sex <- as.factor(data_prepared$Sex)
+data_prepared$`Race Ethnicity` <- as.factor(data_prepared$`Race Ethnicity`)
+data_prepared$Deaths <- as.integer(data_prepared$Deaths)
+```
+
+We have changed the structure of our variables as it is shown below.
+
+```{r}
+str(data_prepared)
+```
+
+```{r}
+hist(data_prepared$Deaths)
+```
+
+Given that the distribution of "Deaths" is skewed to the right, I will use the median to replace the missing values that were present on this column to avoid including any bias in the results.
+
+```{r}
+data_prepared$Deaths[is.na(data_prepared$Deaths)] <- median(data_prepared$Deaths, na.rm=TRUE)
+
+# We use this line of code to get rid of decimals.
+data_prepared$Deaths <- trunc(data_prepared$Deaths)
+```
+
+We can also observe the summary statistics for our transformed data.
+
+```{r}
+summary(data_prepared)
+```
+
+
+### Build Models
+
+Here we will build the SVM model and compare it to our best model from the last assignment, which was a decision tree with 3 predictor variables. I will also include the decision model in this section in order to quickly reference the results for comparison.
+
+```{r}
+# Partition data - train (80%) & test (20%)
+set.seed(1234)
+ind <- sample(2, nrow(data_prepared), replace = T, prob = c(0.8, 0.2))
+train <- data_prepared[ind==1,]
+test <- data_prepared[ind==2,]
+```
+
+Below, the decision tree model:
+
+```{r}
+# Decision Tree
+dt_model <- rpart(Deaths ~ `Leading Cause` + `Race Ethnicity` + Sex,
+   method="anova", train)
+```
+
+Root mean square error and R-square results from the decision tree:
+
+```{r}
+# make predictions
+p1 <- predict(dt_model, test)
+# Root Mean Square Error
+sqrt(mean((test$Deaths - p1)^2))
+# R-square
+(cor(test$Deaths, p1))^2
+```
+
+Additionally, I did point out in the previous assignment that the R-square seemed too good to be true for this model and that we may be over-fitting the data. Just a thought to keep in mind when performing our comparisons.
+
+Following is the SVM model:
+
+```{r}
+svm_model <- svm(Deaths ~ `Leading Cause` + `Race Ethnicity` + Sex, train, kernel = "linear", scale = FALSE)
+summary(svm_model)
+```
+
+Interestingly, when using our SVM model for predictions on either the "train" or "test" sets, we get fewer observations than the original data sets contain. I've read that the `predict()` function does this when it encounters NA values in the data. I have doubled and tripled checked, but I believe to have imputed all missiing values. For this reason, I've had to add a command to exclude NA values (even though there aren't any on my data) to get the right number of observations and calculate the RMSE and R-square.
+
+```{r}
+# make predictions
+p2 <- predict(svm_model, test, na.action = na.exclude)
+# Root Mean Square Error
+sqrt(mean(test$Deaths - p2, na.rm = TRUE)^2)
+# R-square
+(cor(test$Deaths, p2, use = "complete.obs"))^2
+```
+
+After our calculations, it seems that the SVM model does not perform as well as our decision tree model on this given data. We have an RMSE close to 255 and R-square of 0.34, which are not very confident numbers in terms of the model's performance. 
+
+Next we will tune our SVM model and perform a grid search to see if our performance improves:
+
+```{r warning=FALSE}
+# perform a grid search
+svm_tune <- tune(svm, Deaths ~ `Leading Cause` + `Race Ethnicity` + Sex, data=train)
+```
+
+```{r}
+#The best model
+best_mod <- svm_tune$best.model
+best_mod_pred <- predict(best_mod, test, na.action = na.exclude) 
+# Root Mean Square Error
+sqrt(mean(test$Deaths - best_mod_pred, na.rm = TRUE)^2)
+# R-square
+(cor(test$Deaths, best_mod_pred, use = "complete.obs"))^2
+```
+
+Surprisingly, tuning the SVM model improves it dramatically. We get an RMSE of 2.77, which is lower than our decision tree model's RMSE, and R-square of 0.96. Again, my concern is that we may be over-fitting the data with such excellent results.
+
+
+### Conclusion & Review of Academic Articles
+
+According to the models I have built on the given data set, the SVM seems to have outperformed the decision tree model by a very small difference. However, the performance metrics that I used to compare both may suggest we're over-fitting the data with our models. 
+
+Machine Learning algorithms have slowly been introduced in the health care industry to aid in diagnosing certain illnesses. Nevertheless, the general premise of these tools is that they are not intended to replace health care experts but to support their work and position them as information managers. On many academic articles written about SVM and DT models used in health care, I have found that one model can be more accurate than the other depending on the data that is available and the techniques applied to each model. 
+
+As it is noted on the article by the "National Library of Medicine", it is very important to prepare the data that you will use for the models beforehand in order to make reasonable predictions or classifications. One technique that is used on medical data in order to handle imbalance is the Synthetic Minority Over-Sampling Technique (SMOTE). There have been many experiemnts that compared the performance of trained data sets with and without the SMOTE sampling technique and on average there are better results when using this technique.
+
+The articles below, all seem to have found different performances from both SVM and DT models on health care data. Some of the articles have found that the SVM models perform better, others that the DT models have better results. On average, it seems that the SVM is the better performing model but it seems to depend on the data available and the preparation techniques applied before modeling.
+
+In the article "SVM-based Decision Tree for medical knowledge representation" (https://ieeexplore.ieee.org/document/8004949), we find that different classification models are used on health care data in order to help early diagnosis of diseases or to retrieve important medical knowledge in clinical research. It also mentions how machine learning has been applied to image analysis and gene expressions. The proposed method to conduct a study where different health care data would be modeled and analyized was SVM, and it was tested against DT models to compare accuracies. It was found that the classification accuracy of the SVM models on the test data were greater than those from the DT models.
+
+The article "Comparison of machine learning techniques to predict all-cause mortality using fitness data: the Henry ford exercIse teting (FIT) project " (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5735871/) presents us with a study on cardiorespiratory fitness data and the use of several popular machine learning models that include Decision Tree (DT), Support Vector Machine (SVM), Artificial Neural Networks (ANN), Naïve Bayesian Classifier (BC), Bayesian Network (BN), K-Nearest Neighbor (KNN) and Random Forest (RF). The main objective of this study was to evaluate and compare these machine learning methods and explore how they can be applied on medical records and their capabilities/limitations on predicting medical outcomes. The study found that among all the methods, SVM showed the lowest performance, while others such as the DT technique performed better.
+
+Furthermore, the paper "Comparative Analysi of Classification Models for Healthcare Data Analysis" (https://www.ijcit.com/archives/volume7/issue4/IJCIT070404.pdf) attempts to use machine learning techniques such as SVM and DT among others in order to find an early prognosis of cardiovascular diseases, which can aid in making decisions of lifestyle changes for those patients who are most at risk in order to reduce complications. The data was acquired from the Cleveland Heart Dataset and different techniques were applied on the training data sets to conclude that the SVM was the top classifier among all considered in terms of accuracy.
+
+Based on what I've read on these articles, I believe that the SVM and DT models are more commonly used for classification problems, and although in my case I have used them to answer a regression problem, my conclusion is that they are equally effective as evident from my own results. Additionally, we do have to point out that the SVM model needed tuning in order to find the optimal performance on our training data, something that was not needed for the DT model, which makes it a simpler model to obtain similarly accurate results.
